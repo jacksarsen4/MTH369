@@ -1,0 +1,380 @@
+---
+title: "Used Car Price Determinants"
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard:
+    orientation: columns
+    vertical_layout: fill
+    theme: journal
+    source_code: embed
+---
+
+```{r setup, include=FALSE}
+pacman::p_load(flexdashboard, tidyverse, dplyr, ggplot2, forcats, broom, knitr,)
+```
+
+Introduction
+===
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+**Abstract:**
+This project analyzes the main factors that influence used car prices using a cleaned and filtered data set of used car listings. After converting key variables to numeric form and removing extreme outliers, graphs revealed clear trends, most notably that higher mileage lowers price and a new model year raises it. A multiple linear regression model was then built to measure these effects. The results showed that **mileage, model year, brand, model, and accident history all significantly impacted the price**. This analysis provides a foundation to help first time buyers better understand fair pricing in the used car market.
+
+**Motivation:**
+For many college students, they have either never bought a car before or have never bought a car without the help of their parents. The used car market is a massive sea of confusing, inconsistent, and untruthful decisions. As a result of this, first time buyers risk getting ripped off and overpaying or choosing a vehicle that may not be reliable.
+By building a data driven regression model to predict used car prices, I aim to give the youth or first time buyers of America a leg up on negotiation and an understanding of what a fair price should look like.
+
+### Dataset
+```{r}
+cars <- read.csv("./data/used_cars.csv")
+glimpse(cars)
+```
+
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+
+### Research Questions
+
+- Which predictors influence used car prices the strongest?
+
+- Does including accident history and title status improve the model performance?
+
+- Do exterior and Interior colors affect used car prices, or are these mostly just visual differences?
+
+### Data Description {data-height=350}
+**Source:** Kaggle (Used Car Prediction Dataset)
+
+**Variables** 
+- Price (listed sale price)
+
+- Milage (mileage of the vehicle)
+
+- Model_year (year manufactured)
+
+- Brand (manufacturer)
+
+- Model (car model)
+
+- Accident (accident history)
+
+- Clean_title (clean or salvage title)
+
+- Exterior color 
+
+- Interior color
+
+Data Cleaning
+===
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+
+### Data Cleaning Steps
+- **Removed non-numeric characters** from price and mileage columns such as "mi." and "$" by using the function `gsub()`.
+
+- **Filtered extreme outliers** in variables price, mileage, and model_year by using the function `filter()` to filter out all vehicles that were over 200,000 USD, over 300,000 miles, and produced before the year 1990.
+
+- **Reduced categorical complexity** by lumping rare brands and models into an overall "other" category. The data set contained many unique brands and 1898 unique model names which made making a clean looking graph impossible. By using the function `fct_lump_n()`, I was able to reduce the noise on the x-axis and allow for the model to focus on the more important and consistent brands and models.
+
+- **Converted categorical variables to factors** for regression modeling
+
+- **Created log transformed price** to improve normality and stabilize variance
+
+- **Created log transformed mileage** and scaled mileage in thousands `(milage_k)` for better interpretability
+
+### Missing Data Handling
+```{r}
+colSums(is.na(cars))
+```
+
+```{r, include=TRUE}
+cars <- cars %>%
+mutate(
+milage = as.numeric(gsub("[^0-9]", "", milage)),
+price = as.numeric(gsub("[^0-9]", "", price))
+) %>% 
+  drop_na(price, milage, model_year)
+
+
+cars_filtered <- cars %>%
+filter(price < 200000, milage < 300000, model_year >= 1990) %>%
+mutate(
+brand = fct_lump_min(brand, min = 50),
+model = fct_lump_n(model, n = 15),
+clean_title = factor(clean_title),
+accident = factor(accident),
+log_price = log(price),
+milage_k = milage / 1000,
+log_milage = log(milage_k + 1)
+)
+```
+
+### Summary Statistics
+```{r}
+cars_filtered %>%
+  select(price, milage, milage_k, log_milage, model_year) %>% 
+  summary()
+```
+
+Row
+-----------------------------------------------------------------------
+
+### Price Distribution {data-height=400}
+```{r}
+ggplot(cars_filtered, aes(x = price)) +
+geom_histogram(fill="lightblue", bins=50) +
+scale_x_continuous(labels= scales::comma) +
+labs(title="Distribution of Used Car Prices", x="Price", y="Count")
+```
+
+### Log Price Distribution {data-height=400}
+```{r}
+ggplot(cars_filtered, aes(x = log_price)) +
+geom_histogram(fill="navyblue", bins=50) +
+labs(title="Distribution of Log-Transformed Price", x="Log(Price)", y="Count")
+```
+
+
+EDA
+===
+
+Column {.tabset data-width=450} 
+------
+
+### Price vs Mileage
+```{r}
+ggplot(cars_filtered, aes(milage_k, price)) +
+geom_point(alpha = 0.4) +
+labs(x = "Mileage (thousands)", y = "Price", title = "Price vs Mileage") +
+scale_y_continuous(labels = scales::comma)
+```
+
+### Price vs Model Year
+```{r}
+ggplot(cars_filtered, aes(model_year, price)) +
+geom_point(alpha = 0.5, color = "blue") +
+scale_y_continuous(labels = scales::comma) +
+labs(title = "Price vs Model Year")
+```
+
+### Price vs Brand
+```{r}
+ggplot(cars_filtered, aes(brand, price)) +
+geom_boxplot() +
+scale_y_continuous(labels = scales::comma) +
+theme(axis.text.x = element_text(angle=45, hjust=1)) +
+labs(title="Price by Brand", x="Brand", y="Price")
+```
+
+### Price vs Model
+```{r}
+ggplot(cars_filtered, aes(x = model, y = price)) +
+geom_boxplot() +
+scale_y_continuous(labels = scales::comma) +
+labs(
+x = "Model",
+y = "Price ($)",
+title = "Used Car Price by Model"
+) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Price vs Accident History
+```{r}
+ggplot(cars_filtered, aes(accident, price)) +
+geom_boxplot() +
+scale_y_continuous(labels=scales::comma) +
+labs(title="Price by Accident History", x="Accident", y="Price")
+```
+
+### Price vs Title Status
+```{r}
+ggplot(cars_filtered, aes(x = clean_title, y = price)) +
+geom_boxplot() +
+scale_y_continuous(labels = scales::comma) +
+labs(
+x = "Clean Title",
+y = "Price ($)",
+title = "Used Car Price by Clean Title Status"
+)
+```
+
+Row
+-----------------------------------------------------
+
+### Exploratory Data Analysis {data-height=400}
+
+**Price vs Mileage:** Showed a strong negative trend, meaning that cars with a higher mileage tend to have lower price suggesting a nonlinear relationship. With a regression coefficient of (−7.62 × 10⁻⁶,), meaning **for every additional 10,000 miles, the expected price decreases by about 7.6%**. This showed to be one of the strongest predictors of used car price.
+
+**Price vs Model Year:** Showed that newer vehicle tended to have higher costs compared to older vehicles. The regression coefficient for model year, (0.0467), means that **for each additional year that the car is newer, the expected price increases by about 4.78%**. This aligns with the EDA that newer cars are more expensive
+
+**Price vs Title Status:** The box plot comparing cars with clean titles vs non clean titles showed that clean title cars tended to have a slightly higher price, but there was a lot of overlap between groups. This was confirmed in the regression. Clean title (p=0.64) was not a significant predictor, meaning that after controlling for predictors such as mileage and model year, title status does not explain for much variation in price.
+
+**Price vs Model:** The model shows that a car's model has a substantial impact on it's price. High end **sports cars and luxury vehicles** such are Porsche 911's and BMW M Series are associated with significantly higher prices, especially compared to the base model of the same vehicles. In contrast to this, more common vehicles such as the Mustang GT and Jeep Wrangler, did not show a statistically significant difference in price from the baseline model.
+
+Methods
+===
+
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+
+### Analytical Methods
+- Used **multiple linear regression** with log price
+
+- Variables selected based upon EDA and interpretability
+
+- Mileage scaled (milage_k) down by 1000 to stabilize coefficients
+
+- Diagnostics examined: linearity, heteroscedasticity, normality, influence
+
+
+```{r}
+model <- lm(log_price ~ log_milage * model_year + model + accident,
+data = cars_filtered)
+summary(model)
+```
+
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+### Regression Table
+```{r}
+tidy(model, conf.int = TRUE) %>% kable()
+```
+
+### Model Fit
+```{r}
+glance (model) %>% kable()
+```
+
+Diagnostics
+===
+
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+### Diagnostics
+
+**Residuals vs Fitted**
+The Residuals vs Fitted plot helps to assess whether the linear regression assumptions, linearity, and constant variance are satisfied. In this plot, the residuals are fairly centered around zero, but there is noticeable spread and some curvature in the red line, suggesting mild non linearity. The vertical spread appears mostly consistent, though a slight funneling near larger fitted values, which hints at mild heteroscedasticity. A few points are labeled, indicating potential outliers or influential observations that deviate from the general pattern of the data.
+
+**Q-Q Residuals**
+The Q-Q Plot assesses whether residuals follow a normal distribution. If the residuals were perfect, the points would lie along the diagonal line. In this model, the middle section follows the lie very well, suggesting the bulk of the residuals are approximately normal. However, both tails show deviations, the lower tail drops below the line, and the upper tail rises above it. The points near the upper end highlight extreme observations. Overall, the plot suggests that while normality is roughly met in the center of the distribution, there are departures in the tails that may affect inference. 
+
+**Scale-Location**
+The Scale-Location plot checks whether the residuals exhibit constant variance across levels of the fitted values. In this model, the square root of the standardized residuals is plotted against the fitted values from the model `log_price ~ log_milage * model_year + model + accident.` The residuals appear mostly clustered around the horizontal axis, but the red smoothing line shows a slight downward trend, indicating that residual variance decreases for higher fitted values. This suggests mild heteroscedasticity, though is not severe enough to outright invalidate the whole model. 
+**Cook's Distance**
+The Cook's Distance plot identifies observations that exert an unusually large influence on the regression estimates. Several observations in the model (321, 860, and 2781) stand out. These points should be investigated further to determine whether they represent potential outliers that could affect the model estimates, though the overall model is not dominated by these observations.
+
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+
+### Residuals vs Fitted
+```{r}
+plot(model, which = 1)
+```
+
+### Q-Q Residuals
+```{r}
+plot(model, which = 2)
+```
+
+### Scale-Location
+```{r}
+plot(model, which = 3)
+```
+
+### Cook's Distance
+```{r}
+plot(model, which = 4)
+```
+
+### a
+```{r}
+plot(model, which = 1)
+plot(model, which = 2)
+plot(model, which = 3)
+plot(model, which = 4)
+```
+
+Conclusion
+===
+
+Row
+-------
+### **Conclusion**
+This project explored the primary factors that drive used car prices using a cleaned and filtered data set of online listings. Across the exploratory analysis and regression modeling, the two main predictors that stood out were mileage and model year. Vehicles with higher mileage tended to sell for significantly less, whole newer vehicles commanded higher prices. Brand and car model also played a substantial role with luxury and performance vehicles standing on top. Accident history showed small differences when holding other factors constant.
+The multiple linear regression model largely supported this idea and revealed that a combination of model year, mileage, and car model can explain a substantial amount of variability in used car prices. While the model captured broad pricing patterns and provides reasonable insight for first time car buyers, the diagnostics indicated several signs of non linearity and influential outliers. As a result of this, the model should be interpreted as a baseline more than a full out predictive tool.
+
+### **Limitations**
+While this analysis provided useful insight into predicting used car price, several limitations should be acknowledged. First, the **diagnostic plots showed signs of non linearity**, suggesting that the regression model did not capture the full relationship in the data, especially when it came to mileage at the higher price levels. Additionally, **the data contained several very influential outliers**, which may have represented unusually priced vehicles and can disproportionately affect the regression coefficients. The decision to **lump brands and models** into broader categories helped for simplifying visualizations, but it also removed the detail from less common vehicles, for example specific trims. The data is limited in different factors such as **location, trim level, and optional packages (luxury or performance)** that may have played a major role in pricing in the real world. Finally, because the data comes from **online listing rather than final sale prices**, it may reflect higher prices due to the subtraction of the negotiation process which is a very common process when buying a car and often lowers the price at least a little bit.
+
+
+Column {.tabset data-width=350} 
+-----------------------------------------------------------------------
+
+### Personal Information
+
+Jack Sarsen
+
+B.S. Statistics, University of Dayton
+
+Final Project - MTH 369: Regression and Linear Models
+
+Linkedin: linkedin.com/jacksarsen
+
+### Predict Used Car Price
+
+```{r}
+div(
+  style = "max-width: 450px; margin: auto; padding: 20px;
+          border: 1px solid #ccc; border-radius: 10px;
+          background-color: #f9f9f9;",
+
+  tags$h3(style = "text-align:center;"),
+
+  uiOutput("predict_ui"),
+
+  div(style = "text-align:center; margin-top:15px;",
+      verbatimTextOutput("prediction_out")
+  )
+)
+```
+
+```{r, context="server"}
+library(shiny)
+
+# --- Dynamic UI for prediction inputs ---
+output$predict_ui <- renderUI({
+
+  model_choices <- levels(cars_filtered$model)
+  accident_choices <- levels(cars_filtered$accident)
+
+  tagList(
+    numericInput("pred_year", "Model Year:", 2018, 1990, 2025, 1),
+    numericInput("pred_mileage", "Mileage:", 60000, 0, 300000),
+    selectInput("pred_model", "Car Model:", choices = model_choices),
+    selectInput("pred_accident", "Accident History:", choices = accident_choices),
+    actionButton("predict_btn", "Predict Price", class = "btn btn-primary")
+  )
+})
+
+# --- Prediction logic ---
+observeEvent(input$predict_btn, {
+
+  req(input$pred_year, input$pred_mileage,
+      input$pred_model, input$pred_accident)
+
+  newdata <- data.frame(
+    log_milage = log((input$pred_mileage / 1000) + 1),
+    model_year = input$pred_year,
+    model = factor(input$pred_model, levels = levels(cars_filtered$model)),
+    accident = factor(input$pred_accident, levels = levels(cars_filtered$accident))
+  )
+
+  pred_log <- predict(model, newdata = newdata)
+  pred_price <- exp(pred_log)
+
+  output$prediction_out <- renderPrint({
+    cat("Predicted Price: $",
+        format(round(pred_price, 0), big.mark = ","))
+  })
+})
+```
